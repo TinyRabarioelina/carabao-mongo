@@ -222,7 +222,7 @@ Carabao-Mongo is licensed under the MIT License. See the [LICENSE](./LICENSE) fi
 
 ## **Feedback**
 
-If you have any feedback, feature requests, or encounter issues, please open an [issue](https://github.com/yourusername/carabao-mongo/issues).
+If you have any feedback, feature requests, or encounter issues, please open an [issue](https://github.com/TinyRabarioelina/carabao-mongo/issues).
 
 ## **Acknowledgments**
 
