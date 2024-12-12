@@ -1,24 +1,11 @@
 import { MongoClient, Db, ObjectId } from 'mongodb'
 import { v4 } from 'uuid'
 
-import { Query } from '../model/query'
 import { createMatch, createProjection, createLookup } from '../factory'
+import { Collection, Query, WherePredicate } from '../model'
 
 let db: Db
 let client: MongoClient
-
-/**
- * An interface representing what a collection looks like
- * it provides several methods allowing users to manipulate datas inside a given collection
- */
-interface Collection<T> {
-  insertData: (data: T, uniqueFields?: (keyof T)[]) => Promise<string>
-  insertMultipleData: (datas: T[]) => Promise<string[]>
-  updateData: (query: Query<T>, data: Partial<T>) => Promise<void>
-  deleteMultipleData: (uuids: string[]) => Promise<void>
-  findSingleData: (query?: Query<T>) => Promise<T>
-  findMultipleData: (query?: Query<T>) => Promise<T[]>
-}
 
 /**
  * Connect to a remote or local MongoDB database
@@ -26,7 +13,7 @@ interface Collection<T> {
  */
 export const connectDatabase = async (databaseUrl: string) => {
   if (!db) {
-    client = new MongoClient(process.env.DATABASE_URL!)
+    client = new MongoClient(databaseUrl)
     await client.connect()
     db = client.db()
   }
@@ -44,6 +31,27 @@ const getDatabase = async () => db
 export const closeDatabase = async () => client && await client.close()
 
 /**
+ * Utility to convert `uuid` to `_id`
+ * @param filter The filter object to modify
+ */
+const convertUuidToId = (filter: Record<string, unknown>) => {
+  if (filter.uuid) {
+    filter['_id'] = new ObjectId(filter.uuid as string)
+    delete filter.uuid
+  }
+}
+
+/**
+ * Utility to transform MongoDB data to include `uuid` and remove `_id`
+ * @param data The MongoDB document
+ */
+const transformData = <T>(data: any): T => ({
+  ...data,
+  uuid: data._id.toString(),
+  _id: undefined
+}) as T
+
+/**
  * Get an object allowing queries inside the given collection name
  * @param collectionName the name of the collection to query
  * @returns an object allowing queries inside the given collection name
@@ -52,29 +60,14 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
   const db = await getDatabase()
   const collection = db.collection(collectionName)
 
-  /**
-   * Find all datas respecting a given query
-   * @param query
-   * @param single an optional flag to tell if a single data should be return instead of a list of datas
-   * @returns a list of the matchin datas
-   */
   const findData = async (query?: Query<T>, single?: boolean): Promise<T | T[] | undefined> => {
-    const transformData = <T>(data: any): T => ({
-      ...data,
-      uuid: data._id.toString(),
-      _id: undefined
-    }) as T
-
     if (!query) {
-      if (single) {
-        const data = await collection.findOne()
-
-        return data ? transformData(data) : undefined
-      }
-
-      const dataList = await collection.find().toArray()
-
-      return dataList.map(transformData) as T[]
+      const data = single ? await collection.findOne() : await collection.find().toArray()
+      return single
+        ? data
+          ? transformData(data)
+          : undefined
+        : data ? data.map(transformData) as T[] : []
     }
 
     const { where, select, join, joinConditions, limit, skip, sort, aliases } = query
@@ -106,90 +99,71 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       if (typeof limit === 'number' && limit > 0) pipeline.push({ $limit: limit })
     }
 
-    const result = (await collection.aggregate(pipeline).toArray()).map(transformData)
-
-    return single ? result.shift() as T : (result as T[])
+    const result = await collection.aggregate(pipeline).toArray()
+    return single ? result.map(transformData).shift() as T : (result as T[])
   }
 
   return {
-    /**
-     * Delete multiple records using their ids
-     * @param uuids the IDs of the datas to be deleted
-     */
-    deleteMultipleData: async (uuids: string[]) => {
-      await collection.deleteMany({
-        _id: { $in: uuids.map(uuid => new ObjectId(uuid)) }
-      })
+    deleteData: async (query: WherePredicate<T>): Promise<number> => {
+      try {
+        const filter: Record<string, unknown> = { ...query }
+        convertUuidToId(filter)
+
+        const deleteResult = await collection.deleteMany(filter)
+        return deleteResult.deletedCount || 0
+      } catch (error: Error | any) {
+        console.error('Error deleting data with filter:', query, error)
+        throw new Error(`Failed to delete data: ${error.message}`)
+      }
     },
 
-    /**
-     * Find the first record matching the given query
-     * @param query the filter to apply
-     * @returns the data matching the query
-     */
     findSingleData: async (query?: Query<T>) => await findData(query, true) as T,
 
-    /**
-     * Find all records matching the given query
-     * @param query the filter to apply
-     * @returns a list of the matching records
-     */
     findMultipleData: async (query?: Query<T>) => await findData(query) as T[],
 
-    /**
-     * Insert a single data into the collection
-     * @param data the data to insert
-     * @returns the unique ID of the inserted data
-     */
     insertData: async (data: T, uniqueFields?: (keyof T)[]) => {
       const { uuid, ...actualData } = data as any
+
       if (uniqueFields) {
-        for (const field in uniqueFields) {
-          try {
-            !await collection.indexExists(field) && await collection.createIndex({ [field]: 1 }, { unique: true })
-          } catch(_) {
-            console.log('No indexation needed for', field)
+        for (const field of uniqueFields) {
+          if (!(await collection.indexExists(field as string | string[]))) {
+            await collection.createIndex({ [field]: 1 }, { unique: true })
           }
         }
       }
-      const { insertedId } = await collection.insertOne({ _id: v4(), ...actualData })
 
+      const { insertedId } = await collection.insertOne({ _id: v4(), ...actualData })
       return insertedId.toString()
     },
 
-    /**
-     * Insert multiple datas into the collection
-     * @param datas the datas to insert
-     * @returns the unique IDs of the inserted datas
-     */
-    insertMultipleData: async (datas: T[]) => {
-      const finalDatas = datas.map(({ uuid, ...actualData}: any) => ({
+    insertMultipleData: async (datas: T[]): Promise<string[]> => {
+      const finalDatas = datas.map(({ uuid, ...actualData }: any) => ({
         _id: v4(),
         ...actualData
       }))
-
+    
       const { insertedIds } = await collection.insertMany(finalDatas)
-
-      return Object.keys(insertedIds).map((index: any) => insertedIds[index].toString())
+    
+      return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
     },
 
-    /**
-     * Update a given record
-     * @param query the filter to apply to the query
-     * @param data the new data to be saved
-     */
-    updateData: async (query: Query<T>, data: Partial<T>) => {
-      const { uuid, ...realData } = data
+    updateData: async (query: WherePredicate<T>, data: Partial<T>): Promise<number> => {
+      try {
+        if (Object.keys(data).length === 0) {
+          throw new Error('Update data cannot be empty')
+        }
 
-      if (query.where) {
-        const where = query.where as any
-        await collection.updateOne(
-          {
-            ...query.where,
-            _id: where.uuid ? new ObjectId(where.uuid) : undefined
-          },
-          realData
+        const filter: Record<string, unknown> = { ...query }
+        convertUuidToId(filter)
+
+        const updateResult = await collection.updateMany(
+          filter,
+          { $set: data }
         )
+        return updateResult.modifiedCount
+      } catch (error: Error | any) {
+        console.error('Error updating data with filter:', query, error)
+        throw new Error(`Failed to update data: ${error.message}`)
       }
     }
   }
