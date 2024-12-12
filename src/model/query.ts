@@ -8,6 +8,25 @@ export type StringAndStringArrayFields<T> = {
 }[keyof T]
 
 /**
+ * Filtering conditions to match documents.
+ * - Supports simple equality and advanced MongoDB operators (e.g., `$gte`, `$in`, `$regex`).
+ * - Use `or` or `and` to combine multiple conditions.
+ *
+ * Example:
+ * ```typescript
+ * where: {
+ *   createdAt: { $gte: new Date('2024-01-01') },
+ *   name: { $regex: /example/i },
+ *   or: [
+ *     { status: 'active' },
+ *     { priority: { $gte: 5 } }
+ *   ]
+ * }
+ * ```
+ */
+export type WherePredicate<T> = QueryOperators<T> | { or?: QueryOperators<T>[] } | { and?: QueryOperators<T>[] }
+
+/**
  * An interface representing how queries should look like
  */
 export interface Query<T> {
@@ -28,7 +47,7 @@ export interface Query<T> {
    * }
    * ```
    */
-  where?: QueryOperators<T> | { or?: QueryOperators<T>[] } | { and?: QueryOperators<T>[] }
+  where?: WherePredicate<T>
 
   /**
    * Specifies which fields to include in the result.
