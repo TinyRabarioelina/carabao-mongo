@@ -1,3 +1,4 @@
+import { PaginatedResult } from "./paginated.result"
 import { Query, WherePredicate } from "./query"
 
 /**
@@ -47,5 +48,5 @@ export interface Collection<T> {
    * @param query - The query specifying the records to find.
    * @returns A promise that resolves to an array of matching records.
    */
-  findMultipleData: (query?: Query<T>) => Promise<T[]>
+  findMultipleData: (query?: Query<T>) => Promise<PaginatedResult<T>>
 }

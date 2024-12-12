@@ -3,6 +3,7 @@ import { v4 } from 'uuid'
 
 import { createMatch, createProjection, createLookup } from '../factory'
 import { Collection, Query, WherePredicate } from '../model'
+import { PaginatedResult } from '../model/paginated.result'
 
 let db: Db
 let client: MongoClient
@@ -42,16 +43,6 @@ const convertUuidToId = (filter: Record<string, unknown>) => {
 }
 
 /**
- * Utility to transform MongoDB data to include `uuid` and remove `_id`
- * @param data The MongoDB document
- */
-const transformData = <T>(data: any): T => ({
-  ...data,
-  uuid: data._id.toString(),
-  _id: undefined
-}) as T
-
-/**
  * Get an object allowing queries inside the given collection name
  * @param collectionName the name of the collection to query
  * @returns an object allowing queries inside the given collection name
@@ -60,22 +51,36 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
   const db = await getDatabase()
   const collection = db.collection(collectionName)
 
-  const findData = async (query?: Query<T>, single?: boolean): Promise<T | T[] | undefined> => {
+  const findData = async (query?: Query<T>, single?: boolean): Promise<PaginatedResult<T>> => {
+    const transformData = <T>(data: any): T => ({
+      ...data,
+      uuid: data._id.toString(),
+      _id: undefined
+    }) as T
+  
     if (!query) {
-      const data = single ? await collection.findOne() : await collection.find().toArray()
-      return single
-        ? data
-          ? transformData(data)
-          : undefined
-        : data ? data.map(transformData) as T[] : []
+      const totalCount = await collection.countDocuments()
+      if (single) {
+        const data = await collection.findOne()
+        return {
+          datas: data ? [transformData(data)] : [],
+          totalCount
+        }
+      }
+  
+      const dataList = await collection.find().toArray()
+      return {
+        datas: dataList.map(transformData) as T[],
+        totalCount
+      }
     }
-
+  
     const { where, select, join, joinConditions, limit, skip, sort, aliases } = query
-
+  
     const matchStage = createMatch(where)
     const projectionStage = createProjection(select)
     const lookupStages = createLookup(join, joinConditions)
-
+  
     const pipeline: Record<string, unknown>[] = []
     if (Object.keys(matchStage).length > 0) pipeline.push({ $match: matchStage })
     pipeline.push(...lookupStages)
@@ -94,13 +99,22 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         )
       })
     }
+
+    const totalCountPipeline = [...pipeline, { $count: 'totalCount' }]
+    const totalCountResult = await collection.aggregate(totalCountPipeline).toArray()
+    const totalCount = totalCountResult[0]?.totalCount || 0
+  
     if (!single) {
       if (typeof skip === 'number' && skip > 0) pipeline.push({ $skip: skip })
       if (typeof limit === 'number' && limit > 0) pipeline.push({ $limit: limit })
     }
-
+  
     const result = await collection.aggregate(pipeline).toArray()
-    return single ? result.map(transformData).shift() as T : (result as T[])
+  
+    return {
+      datas: result.map(transformData) as T[],
+      totalCount
+    }
   }
 
   return {
@@ -117,9 +131,9 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       }
     },
 
-    findSingleData: async (query?: Query<T>) => await findData(query, true) as T,
+    findSingleData: async (query?: Query<T>) => ((await findData(query, true)).datas.shift()) as T,
 
-    findMultipleData: async (query?: Query<T>) => await findData(query) as T[],
+    findMultipleData: async (query?: Query<T>) => await findData(query),
 
     insertData: async (data: T, uniqueFields?: (keyof T)[]) => {
       const { uuid, ...actualData } = data as any
