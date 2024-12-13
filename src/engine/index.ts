@@ -118,12 +118,12 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
   }
 
   return {
-    deleteData: async (query: WherePredicate<T>): Promise<number> => {
+    deleteData: async (query: WherePredicate<T>, session?: MongoClient['startSession']): Promise<number> => {
       try {
         const filter: Record<string, unknown> = { ...query }
         convertUuidToId(filter)
 
-        const deleteResult = await collection.deleteMany(filter)
+        const deleteResult = await collection.deleteMany(filter, session ? { session } as any : undefined)
         return deleteResult.deletedCount || 0
       } catch (error: Error | any) {
         console.error('Error deleting data with filter:', query, error)
@@ -135,7 +135,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
 
     findMultipleData: async (query?: Query<T>) => await findData(query),
 
-    insertData: async (data: T, uniqueFields?: (keyof T)[]) => {
+    insertData: async (data: T, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => {
       const { uuid, ...actualData } = data as any
 
       if (uniqueFields) {
@@ -146,22 +146,25 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         }
       }
 
-      const { insertedId } = await collection.insertOne({ _id: v4(), ...actualData })
+      const { insertedId } = await collection.insertOne(
+        { _id: v4(), ...actualData },
+        session ? { session } as any : undefined
+      )
       return insertedId.toString()
     },
 
-    insertMultipleData: async (datas: T[]): Promise<string[]> => {
+    insertMultipleData: async (datas: T[], session?: MongoClient['startSession']): Promise<string[]> => {
       const finalDatas = datas.map(({ uuid, ...actualData }: any) => ({
         _id: v4(),
         ...actualData
       }))
     
-      const { insertedIds } = await collection.insertMany(finalDatas)
+      const { insertedIds } = await collection.insertMany(finalDatas, session ? { session } as any : undefined)
     
       return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
     },
 
-    updateData: async (query: WherePredicate<T>, data: Partial<T>): Promise<number> => {
+    updateData: async (query: WherePredicate<T>, data: Partial<T>, session?: MongoClient['startSession']): Promise<number> => {
       try {
         if (Object.keys(data).length === 0) {
           throw new Error('Update data cannot be empty')
@@ -172,12 +175,30 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
 
         const updateResult = await collection.updateMany(
           filter,
-          { $set: data }
+          { $set: data },
+          session ? { session } as any : undefined
         )
         return updateResult.modifiedCount
       } catch (error: Error | any) {
         console.error('Error updating data with filter:', query, error)
         throw new Error(`Failed to update data: ${error.message}`)
+      }
+    },
+
+    executeTransaction: async <T>(operations: (session: any) => Promise<T>): Promise<T> => {
+      const session = client.startSession()
+    
+      try {
+        let result: T
+        await session.withTransaction(async () => {
+          result = await operations(session)
+        })
+        return result!
+      } catch (error: Error | any) {
+        console.error('Transaction failed:', error)
+        throw new Error(`Transaction failed: ${error.message}`)
+      } finally {
+        session.endSession()
       }
     }
   }
