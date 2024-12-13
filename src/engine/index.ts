@@ -3,6 +3,7 @@ import { v4 } from 'uuid'
 
 import { createMatch, createProjection, createLookup } from '../factory'
 import { Collection, Query, WherePredicate } from '../model'
+import { PaginatedResult } from '../model/paginated.result'
 
 let db: Db
 let client: MongoClient
@@ -42,16 +43,6 @@ const convertUuidToId = (filter: Record<string, unknown>) => {
 }
 
 /**
- * Utility to transform MongoDB data to include `uuid` and remove `_id`
- * @param data The MongoDB document
- */
-const transformData = <T>(data: any): T => ({
-  ...data,
-  uuid: data._id.toString(),
-  _id: undefined
-}) as T
-
-/**
  * Get an object allowing queries inside the given collection name
  * @param collectionName the name of the collection to query
  * @returns an object allowing queries inside the given collection name
@@ -60,22 +51,36 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
   const db = await getDatabase()
   const collection = db.collection(collectionName)
 
-  const findData = async (query?: Query<T>, single?: boolean): Promise<T | T[] | undefined> => {
+  const findData = async (query?: Query<T>, single?: boolean): Promise<PaginatedResult<T>> => {
+    const transformData = <T>(data: any): T => ({
+      ...data,
+      uuid: data._id.toString(),
+      _id: undefined
+    }) as T
+  
     if (!query) {
-      const data = single ? await collection.findOne() : await collection.find().toArray()
-      return single
-        ? data
-          ? transformData(data)
-          : undefined
-        : data ? data.map(transformData) as T[] : []
+      const totalCount = await collection.countDocuments()
+      if (single) {
+        const data = await collection.findOne()
+        return {
+          datas: data ? [transformData(data)] : [],
+          totalCount
+        }
+      }
+  
+      const dataList = await collection.find().toArray()
+      return {
+        datas: dataList.map(transformData) as T[],
+        totalCount
+      }
     }
-
+  
     const { where, select, join, joinConditions, limit, skip, sort, aliases } = query
-
+  
     const matchStage = createMatch(where)
     const projectionStage = createProjection(select)
     const lookupStages = createLookup(join, joinConditions)
-
+  
     const pipeline: Record<string, unknown>[] = []
     if (Object.keys(matchStage).length > 0) pipeline.push({ $match: matchStage })
     pipeline.push(...lookupStages)
@@ -94,22 +99,31 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         )
       })
     }
+
+    const totalCountPipeline = [...pipeline, { $count: 'totalCount' }]
+    const totalCountResult = await collection.aggregate(totalCountPipeline).toArray()
+    const totalCount = totalCountResult[0]?.totalCount || 0
+  
     if (!single) {
       if (typeof skip === 'number' && skip > 0) pipeline.push({ $skip: skip })
       if (typeof limit === 'number' && limit > 0) pipeline.push({ $limit: limit })
     }
-
+  
     const result = await collection.aggregate(pipeline).toArray()
-    return single ? result.map(transformData).shift() as T : (result as T[])
+  
+    return {
+      datas: result.map(transformData) as T[],
+      totalCount
+    }
   }
 
   return {
-    deleteData: async (query: WherePredicate<T>): Promise<number> => {
+    deleteData: async (query: WherePredicate<T>, session?: MongoClient['startSession']): Promise<number> => {
       try {
         const filter: Record<string, unknown> = { ...query }
         convertUuidToId(filter)
 
-        const deleteResult = await collection.deleteMany(filter)
+        const deleteResult = await collection.deleteMany(filter, session ? { session } as any : undefined)
         return deleteResult.deletedCount || 0
       } catch (error: Error | any) {
         console.error('Error deleting data with filter:', query, error)
@@ -117,11 +131,11 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       }
     },
 
-    findSingleData: async (query?: Query<T>) => await findData(query, true) as T,
+    findSingleData: async (query?: Query<T>) => ((await findData(query, true)).datas.shift()) as T,
 
-    findMultipleData: async (query?: Query<T>) => await findData(query) as T[],
+    findMultipleData: async (query?: Query<T>) => await findData(query),
 
-    insertData: async (data: T, uniqueFields?: (keyof T)[]) => {
+    insertData: async (data: T, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => {
       const { uuid, ...actualData } = data as any
 
       if (uniqueFields) {
@@ -132,22 +146,25 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         }
       }
 
-      const { insertedId } = await collection.insertOne({ _id: v4(), ...actualData })
+      const { insertedId } = await collection.insertOne(
+        { _id: v4(), ...actualData },
+        session ? { session } as any : undefined
+      )
       return insertedId.toString()
     },
 
-    insertMultipleData: async (datas: T[]): Promise<string[]> => {
+    insertMultipleData: async (datas: T[], session?: MongoClient['startSession']): Promise<string[]> => {
       const finalDatas = datas.map(({ uuid, ...actualData }: any) => ({
         _id: v4(),
         ...actualData
       }))
     
-      const { insertedIds } = await collection.insertMany(finalDatas)
+      const { insertedIds } = await collection.insertMany(finalDatas, session ? { session } as any : undefined)
     
       return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
     },
 
-    updateData: async (query: WherePredicate<T>, data: Partial<T>): Promise<number> => {
+    updateData: async (query: WherePredicate<T>, data: Partial<T>, session?: MongoClient['startSession']): Promise<number> => {
       try {
         if (Object.keys(data).length === 0) {
           throw new Error('Update data cannot be empty')
@@ -158,12 +175,30 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
 
         const updateResult = await collection.updateMany(
           filter,
-          { $set: data }
+          { $set: data },
+          session ? { session } as any : undefined
         )
         return updateResult.modifiedCount
       } catch (error: Error | any) {
         console.error('Error updating data with filter:', query, error)
         throw new Error(`Failed to update data: ${error.message}`)
+      }
+    },
+
+    executeTransaction: async <T>(operations: (session: any) => Promise<T>): Promise<T> => {
+      const session = client.startSession()
+    
+      try {
+        let result: T
+        await session.withTransaction(async () => {
+          result = await operations(session)
+        })
+        return result!
+      } catch (error: Error | any) {
+        console.error('Transaction failed:', error)
+        throw new Error(`Transaction failed: ${error.message}`)
+      } finally {
+        session.endSession()
       }
     }
   }

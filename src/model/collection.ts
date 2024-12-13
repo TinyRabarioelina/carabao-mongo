@@ -1,3 +1,5 @@
+import { MongoClient } from "mongodb"
+import { PaginatedResult } from "./paginated.result"
 import { Query, WherePredicate } from "./query"
 
 /**
@@ -11,14 +13,14 @@ export interface Collection<T> {
    * @param uniqueFields - Optional array of field names to enforce uniqueness.
    * @returns A promise that resolves to the unique ID of the inserted record.
    */
-  insertData: (data: T, uniqueFields?: (keyof T)[]) => Promise<string>
+  insertData: (data: T, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => Promise<string>
 
   /**
    * Inserts multiple records into the collection.
    * @param datas - An array of data objects to insert.
    * @returns A promise that resolves to an array of unique IDs of the inserted records.
    */
-  insertMultipleData: (datas: T[]) => Promise<string[]>
+  insertMultipleData: (datas: T[], session?: MongoClient['startSession']) => Promise<string[]>
 
   /**
    * Updates records matching the given query.
@@ -26,14 +28,14 @@ export interface Collection<T> {
    * @param data - The updated data to apply.
    * @returns A promise that resolves to the number of datas updated when the update is complete.
    */
-  updateData: (query: WherePredicate<T>, data: Partial<T>) => Promise<number>
+  updateData: (query: WherePredicate<T>, data: Partial<T>, session?: MongoClient['startSession']) => Promise<number>
 
   /**
- * Deletes all records matching the given query.
- * @param query - The filter query specifying which records to delete.
- * @returns A promise that resolves to the number of deleted documents.
- */
-  deleteData: (query: WherePredicate<T>) => Promise<number>
+   * Deletes all records matching the given query.
+   * @param query - The filter query specifying which records to delete.
+   * @returns A promise that resolves to the number of deleted documents.
+   */
+  deleteData: (query: WherePredicate<T>, session?: MongoClient['startSession']) => Promise<number>
 
   /**
    * Finds the first record that matches the given query.
@@ -47,5 +49,13 @@ export interface Collection<T> {
    * @param query - The query specifying the records to find.
    * @returns A promise that resolves to an array of matching records.
    */
-  findMultipleData: (query?: Query<T>) => Promise<T[]>
+  findMultipleData: (query?: Query<T>) => Promise<PaginatedResult<T>>
+
+  /**
+   * Executes a series of operations within a transaction.
+   * @param operations - A callback function containing the operations to execute.
+   * @returns The result of the transaction, if successful.
+   * @throws An error if the transaction fails.
+   */
+  executeTransaction: <T>(operations: (session: MongoClient['startSession']) => Promise<T>) => Promise<T>
 }
