@@ -1,6 +1,6 @@
 {
   "name": "carabao-mongo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reusable MongoDB utilities and query logic",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
