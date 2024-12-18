@@ -21,15 +21,39 @@ export const connectDatabase = async (databaseUrl: string) => {
 }
 
 /**
- * Open the specified Database
+ * Return the original MongoDB database in order to permit raw queries.
+ * This ensures that users still have the choice to use MongoDB directly.
  * @returns the database
  */
-const getDatabase = async () => db
+const getRawDatabase = () => db
 
 /**
  * Close the current connection to the database
  */
 export const closeDatabase = async () => client && await client.close()
+
+/**
+ * Executes a series of operations within a transaction.
+ * @param operations - A callback function containing the operations to execute.
+ * @returns The result of the transaction, if successful.
+ * @throws An error if the transaction fails.
+ */
+export const executeTransaction = async <T>(operations: (session: any) => Promise<T>): Promise<T> => {
+  const session = client.startSession()
+
+  try {
+    let result: T
+    await session.withTransaction(async () => {
+      result = await operations(session)
+    })
+    return result!
+  } catch (error: Error | any) {
+    console.error('Transaction failed:', error)
+    throw new Error(`Transaction failed: ${error.message}`)
+  } finally {
+    session.endSession()
+  }
+}
 
 /**
  * Utility to convert `uuid` to `_id`
@@ -48,7 +72,7 @@ const convertUuidToId = (filter: Record<string, unknown>) => {
  * @returns an object allowing queries inside the given collection name
  */
 export const getCollection = async <T extends { uuid?: string | ObjectId }>(collectionName: string): Promise<Collection<T>> => {
-  const db = await getDatabase()
+  const db = getRawDatabase()
   const collection = db.collection(collectionName)
 
   const findData = async (query?: Query<T>, single?: boolean): Promise<PaginatedResult<T>> => {
@@ -182,23 +206,6 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       } catch (error: Error | any) {
         console.error('Error updating data with filter:', query, error)
         throw new Error(`Failed to update data: ${error.message}`)
-      }
-    },
-
-    executeTransaction: async <T>(operations: (session: any) => Promise<T>): Promise<T> => {
-      const session = client.startSession()
-    
-      try {
-        let result: T
-        await session.withTransaction(async () => {
-          result = await operations(session)
-        })
-        return result!
-      } catch (error: Error | any) {
-        console.error('Transaction failed:', error)
-        throw new Error(`Transaction failed: ${error.message}`)
-      } finally {
-        session.endSession()
       }
     }
   }

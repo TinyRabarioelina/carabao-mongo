@@ -68,6 +68,7 @@ const userCollection = await getCollection<User>('users')
 ### Insert Data
 
 #### Insert a Single Document
+
 ```typescript
 const userId = await userCollection.insertData({
   name: 'John Doe',
@@ -79,6 +80,7 @@ console.log('Inserted User ID:', userId)
 ```
 
 #### Insert Multiple Documents
+
 ```typescript
 const userIds = await userCollection.insertMultipleData([
   { name: 'Alice', email: 'alice@example.com', createdAt: new Date(), status: 'active' },
@@ -92,6 +94,7 @@ console.log('Inserted User IDs:', userIds)
 ### Query Data
 
 #### Find a Single Document
+
 ```typescript
 const user = await userCollection.findSingleData({
   where: { email: 'john.doe@example.com' }
@@ -100,6 +103,7 @@ console.log('User:', user)
 ```
 
 #### Find Multiple Documents
+
 ```typescript
 const activeUsers = await userCollection.findMultipleData({
   where: { status: 'active' },
@@ -140,12 +144,25 @@ console.log('Deleted Documents:', deletedCount)
 #### Example: Join with Another Collection
 
 ```typescript
-const projects = await userCollection.findMultipleData({
+interface Project {
+  uuid?: string
+  name: string
+  createdBy: string // UUID of the user who created the project
+  members: string[] // UUIDs of users who are members of the project
+}
+
+const projectCollection = await getCollection<Project>('projects')
+
+const projects = await projectCollection.findMultipleData({
   join: {
-    createdBy: { collectionName: 'users', select: ['name', 'email'] }
+    createdBy: { collectionName: 'users', select: ['name', 'email'] },
+    members: { collectionName: 'users', select: ['name', 'email'] }
   },
   where: { status: 'active' }
 })
+
+// projects will now contain the joined data instead of just UUIDs
+
 console.log('Projects with User Info:', projects)
 ```
 
@@ -200,9 +217,9 @@ try {
 ## **Contributing**
 
 1. Clone the repository:
-   ```bash
+```bash
    git clone https://github.com/yourusername/carabao-mongo.git
-   ```
+```
 2. Install dependencies:
    ```bash
    npm install
@@ -216,7 +233,7 @@ try {
 
 ## **License**
 
-Carabao-Mongo is licensed under the MIT License. See the [LICENSE](./LICENSE) file for more details.
+Carabao-Mongo is licensed under the MIT License. See the [LICENSE](https://github.com/TinyRabarioelina/carabao-mongo/blob/main/LICENSE) file for more details.
 
 ---
 
