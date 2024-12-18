@@ -21,10 +21,11 @@ export const connectDatabase = async (databaseUrl: string) => {
 }
 
 /**
- * Open the specified Database
+ * Return the original MongoDB database in order to permit raw queries.
+ * This ensures that users still have the choice to use MongoDB directly.
  * @returns the database
  */
-const getDatabase = async () => db
+const getRawDatabase = () => db
 
 /**
  * Close the current connection to the database
@@ -71,7 +72,7 @@ const convertUuidToId = (filter: Record<string, unknown>) => {
  * @returns an object allowing queries inside the given collection name
  */
 export const getCollection = async <T extends { uuid?: string | ObjectId }>(collectionName: string): Promise<Collection<T>> => {
-  const db = await getDatabase()
+  const db = getRawDatabase()
   const collection = db.collection(collectionName)
 
   const findData = async (query?: Query<T>, single?: boolean): Promise<PaginatedResult<T>> => {
