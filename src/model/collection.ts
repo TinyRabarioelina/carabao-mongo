@@ -50,12 +50,4 @@ export interface Collection<T> {
    * @returns A promise that resolves to an array of matching records.
    */
   findMultipleData: (query?: Query<T>) => Promise<PaginatedResult<T>>
-
-  /**
-   * Executes a series of operations within a transaction.
-   * @param operations - A callback function containing the operations to execute.
-   * @returns The result of the transaction, if successful.
-   * @throws An error if the transaction fails.
-   */
-  executeTransaction: <T>(operations: (session: MongoClient['startSession']) => Promise<T>) => Promise<T>
 }

@@ -32,6 +32,29 @@ const getDatabase = async () => db
 export const closeDatabase = async () => client && await client.close()
 
 /**
+ * Executes a series of operations within a transaction.
+ * @param operations - A callback function containing the operations to execute.
+ * @returns The result of the transaction, if successful.
+ * @throws An error if the transaction fails.
+ */
+export const executeTransaction = async <T>(operations: (session: any) => Promise<T>): Promise<T> => {
+  const session = client.startSession()
+
+  try {
+    let result: T
+    await session.withTransaction(async () => {
+      result = await operations(session)
+    })
+    return result!
+  } catch (error: Error | any) {
+    console.error('Transaction failed:', error)
+    throw new Error(`Transaction failed: ${error.message}`)
+  } finally {
+    session.endSession()
+  }
+}
+
+/**
  * Utility to convert `uuid` to `_id`
  * @param filter The filter object to modify
  */
@@ -182,23 +205,6 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       } catch (error: Error | any) {
         console.error('Error updating data with filter:', query, error)
         throw new Error(`Failed to update data: ${error.message}`)
-      }
-    },
-
-    executeTransaction: async <T>(operations: (session: any) => Promise<T>): Promise<T> => {
-      const session = client.startSession()
-    
-      try {
-        let result: T
-        await session.withTransaction(async () => {
-          result = await operations(session)
-        })
-        return result!
-      } catch (error: Error | any) {
-        console.error('Transaction failed:', error)
-        throw new Error(`Transaction failed: ${error.message}`)
-      } finally {
-        session.endSession()
       }
     }
   }
