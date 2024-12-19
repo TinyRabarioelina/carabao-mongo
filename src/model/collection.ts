@@ -18,17 +18,19 @@ export interface Collection<T> {
   /**
    * Inserts multiple records into the collection.
    * @param datas - An array of data objects to insert.
+   * @param uniqueFields - Optional array of field names to enforce uniqueness.
    * @returns A promise that resolves to an array of unique IDs of the inserted records.
    */
-  insertMultipleData: (datas: T[], session?: MongoClient['startSession']) => Promise<string[]>
+  insertMultipleData: (datas: T[], uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => Promise<string[]>
 
   /**
    * Updates records matching the given query.
    * @param query - The query specifying which records to update.
    * @param data - The updated data to apply.
+   * @param uniqueFields - Optional array of field names to enforce uniqueness.
    * @returns A promise that resolves to the number of datas updated when the update is complete.
    */
-  updateData: (query: WherePredicate<T>, data: Partial<T>, session?: MongoClient['startSession']) => Promise<number>
+  updateData: (query: WherePredicate<T>, data: Partial<T>, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => Promise<number>
 
   /**
    * Deletes all records matching the given query.
