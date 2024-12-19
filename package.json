@@ -1,6 +1,6 @@
 {
   "name": "carabao-mongo",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Reusable MongoDB utilities and query logic",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,9 +15,24 @@
   },
   "keywords": [
     "mongodb",
-    "query",
-    "utility",
-    "typescript"
+    "typescript",
+    "orm",
+    "odm",
+    "database",
+    "query builder",
+    "acid",
+    "aggregation",
+    "join",
+    "pagination",
+    "filtering",
+    "backend",
+    "node.js",
+    "javascript",
+    "crud",
+    "rest",
+    "carabao",
+    "mongo odm",
+    "utility"
   ],
   "author": {
     "name": "Tiny Ackerman",

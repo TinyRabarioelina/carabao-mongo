@@ -4,6 +4,7 @@ import { v4 } from 'uuid'
 import { createMatch, createProjection, createLookup } from '../factory'
 import { Collection, Query, WherePredicate } from '../model'
 import { PaginatedResult } from '../model/paginated.result'
+import { validateUniqueFields } from '../validator/unique.validator'
 
 let db: Db
 let client: MongoClient
@@ -46,6 +47,7 @@ export const executeTransaction = async <T>(operations: (session: any) => Promis
     await session.withTransaction(async () => {
       result = await operations(session)
     })
+
     return result!
   } catch (error: Error | any) {
     console.error('Transaction failed:', error)
@@ -162,13 +164,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
     insertData: async (data: T, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => {
       const { uuid, ...actualData } = data as any
 
-      if (uniqueFields) {
-        for (const field of uniqueFields) {
-          if (!(await collection.indexExists(field as string | string[]))) {
-            await collection.createIndex({ [field]: 1 }, { unique: true })
-          }
-        }
-      }
+      await validateUniqueFields<T>(collection, uniqueFields)
 
       const { insertedId } = await collection.insertOne(
         { _id: v4(), ...actualData },
@@ -177,22 +173,26 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       return insertedId.toString()
     },
 
-    insertMultipleData: async (datas: T[], session?: MongoClient['startSession']): Promise<string[]> => {
+    insertMultipleData: async (datas: T[], uniqueFields?: (keyof T)[], session?: MongoClient['startSession']): Promise<string[]> => {
       const finalDatas = datas.map(({ uuid, ...actualData }: any) => ({
         _id: v4(),
         ...actualData
       }))
+
+      await validateUniqueFields<T>(collection, uniqueFields)
     
       const { insertedIds } = await collection.insertMany(finalDatas, session ? { session } as any : undefined)
     
       return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
     },
 
-    updateData: async (query: WherePredicate<T>, data: Partial<T>, session?: MongoClient['startSession']): Promise<number> => {
+    updateData: async (query: WherePredicate<T>, data: Partial<T>, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']): Promise<number> => {
       try {
         if (Object.keys(data).length === 0) {
           throw new Error('Update data cannot be empty')
         }
+
+        await validateUniqueFields<T>(collection, uniqueFields)
 
         const filter: Record<string, unknown> = { ...query }
         convertUuidToId(filter)
