@@ -12,8 +12,12 @@ import { Collection, Document } from "mongodb"
 export const validateUniqueFields = async <T>(collection: Collection<Document>, uniqueFields?: (keyof T)[]) => {
   if (uniqueFields) {
     for (const field of uniqueFields) {
-      if (!(await collection.indexExists(field as string | string[]))) {
-        await collection.createIndex({ [field]: 1 }, { unique: true })
+      try {
+        if (!(await collection.indexExists(field as string | string[]))) {
+          await collection.createIndex({ [field]: 1 }, { unique: true })
+        }
+      } catch(e: any) {
+        console.log('No need to create index for field: ', field)
       }
     }
   }
