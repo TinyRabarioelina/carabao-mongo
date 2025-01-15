@@ -88,6 +88,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       const totalCount = await collection.countDocuments()
       if (single) {
         const data = await collection.findOne()
+
         return {
           datas: data ? [transformData(data)] : [],
           totalCount
@@ -95,6 +96,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       }
   
       const dataList = await collection.find().toArray()
+
       return {
         datas: dataList.map(transformData) as T[],
         totalCount
@@ -102,29 +104,33 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
     }
   
     const { where, select, join, joinConditions, limit, skip, sort, aliases } = query
-  
-    const matchStage = createMatch(where)
-    const projectionStage = createProjection(select)
-    const lookupStages = createLookup(join, joinConditions)
-  
+   
     const pipeline: Record<string, unknown>[] = []
-    if (Object.keys(matchStage).length > 0) pipeline.push({ $match: matchStage })
+
+    const matchStage = createMatch(where)
+    Object.keys(matchStage).length && pipeline.push({ $match: matchStage })
+
+    const lookupStages = createLookup(join, joinConditions)
     pipeline.push(...lookupStages)
-    if (aliases) {
-      pipeline.push({
+
+    aliases && pipeline.push(
+      {
         $addFields: Object.fromEntries(
           Object.entries(aliases).map(([alias, original]) => [alias, `$${original}`])
         )
-      })
-    }
-    if (Object.keys(projectionStage).length > 0) pipeline.push({ $project: projectionStage })
-    if (sort) {
-      pipeline.push({
+      }
+    )
+
+    const projectionStage = createProjection(select)
+    Object.keys(projectionStage).length && pipeline.push({ $project: projectionStage })
+
+    sort && pipeline.push(
+      {
         $sort: Object.fromEntries(
           Object.entries(sort).map(([key, order]) => [key, order === 'asc' ? 1 : -1])
         )
-      })
-    }
+      }
+    )
 
     const totalCountPipeline = [...pipeline, { $count: 'totalCount' }]
     const totalCountResult = await collection.aggregate(totalCountPipeline).toArray()

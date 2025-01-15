@@ -70,12 +70,15 @@ const userCollection = await getCollection<User>('users')
 #### Insert a Single Document
 
 ```typescript
-const userId = await userCollection.insertData({
-  name: 'John Doe',
-  email: 'john.doe@example.com',
-  createdAt: new Date(),
-  status: 'active'
-})
+const userId = await userCollection.insertData(
+  {
+    name: 'John Doe',
+    email: 'john.doe@example.com',
+    createdAt: new Date(),
+    status: 'active'
+  },
+  ['email'] // mark the email field as unique (inserting a data with an already existing email will raise an exception)
+)
 console.log('Inserted User ID:', userId)
 ```
 
@@ -218,7 +221,7 @@ try {
 
 1. Clone the repository:
 ```bash
-   git clone https://github.com/yourusername/carabao-mongo.git
+   git clone https://github.com/TinyRabarioelina/carabao-mongo.git
 ```
 2. Install dependencies:
    ```bash
