@@ -154,8 +154,8 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       try {
         const filter: Record<string, unknown> = { ...query }
         convertUuidToId(filter)
-
         const deleteResult = await collection.deleteMany(filter, session ? { session } as any : undefined)
+
         return deleteResult.deletedCount || 0
       } catch (error: Error | any) {
         console.error('Error deleting data with filter:', query, error)
@@ -176,6 +176,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         { _id: v4(), ...actualData },
         session ? { session } as any : undefined
       )
+
       return insertedId.toString()
     },
 
@@ -201,13 +202,13 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         await validateUniqueFields<T>(collection, uniqueFields)
 
         const filter: Record<string, unknown> = { ...query }
-        convertUuidToId(filter)
 
         const updateResult = await collection.updateMany(
           filter,
           { $set: data },
           session ? { session } as any : undefined
         )
+
         return updateResult.modifiedCount
       } catch (error: Error | any) {
         console.error('Error updating data with filter:', query, error)
