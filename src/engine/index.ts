@@ -63,7 +63,7 @@ export const executeTransaction = async <T>(operations: (session: any) => Promis
  */
 const convertUuidToId = (filter: Record<string, unknown>) => {
   if (filter.uuid) {
-    filter['_id'] = new ObjectId(filter.uuid as string)
+    filter['_id'] = filter.uuid
     delete filter.uuid
   }
 }
@@ -202,6 +202,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         await validateUniqueFields<T>(collection, uniqueFields)
 
         const filter: Record<string, unknown> = { ...query }
+        convertUuidToId(filter)
 
         const updateResult = await collection.updateMany(
           filter,
