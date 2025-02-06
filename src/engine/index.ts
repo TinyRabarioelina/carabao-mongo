@@ -107,6 +107,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
    
     const pipeline: Record<string, unknown>[] = []
 
+    where && convertUuidToId(where)
     const matchStage = createMatch(where)
     Object.keys(matchStage).length && pipeline.push({ $match: matchStage })
 
