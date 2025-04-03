@@ -189,9 +189,15 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
 
       await validateUniqueFields<T>(collection, uniqueFields)
     
-      const { insertedIds } = await collection.insertMany(finalDatas, session ? { session } as any : undefined)
+      try {
+        const { insertedIds } = await collection.insertMany(finalDatas, session ? { session, ordered: false } as any : { ordered: false })
     
-      return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
+        return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
+      } catch (err: any) {
+        return err.result?.insertedIds
+          ? Object.values(err.result.insertedIds).map((id: any) => id.toString())
+          : []
+      }
     },
 
     updateData: async (query: WherePredicate<T>, data: Partial<T>, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']): Promise<number> => {
