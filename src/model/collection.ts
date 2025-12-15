@@ -64,4 +64,11 @@ export interface Collection<T> {
    * @returns A promise that resolves to an array of matching records.
    */
   findMultipleData: (query?: Query<T>) => Promise<PaginatedResult<T>>
+
+  /**
+   * Counts the number of records matching the given predicate.
+   * @param predicate - The filter specifying which records to count.
+   * @returns A promise that resolves to the count of matching records.
+   */
+  countData: (predicate?: { where: WherePredicate<T> }) => Promise<number>
 }

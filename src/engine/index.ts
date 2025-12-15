@@ -240,6 +240,24 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         writeLog('error', 'Error updating data with filter:', query, error)
         throw new Error(`Failed to update data: ${error.message}`)
       }
+    },
+
+    countData: async (predicate?: { where: WherePredicate<T> }) => {
+      try {
+        if (!predicate?.where) {
+          return await collection.countDocuments()
+        }
+
+        const filter: Record<string, unknown> = { ...predicate.where }
+        convertUuidToId(filter)
+
+        const matchStage = createMatch(filter)
+
+        return await collection.countDocuments(matchStage)
+      } catch (error: Error | any) {
+        writeLog('error', 'Error counting data with filter:', predicate?.where, error)
+        throw new Error(`Failed to count data: ${error.message}`)
+      }
     }
   }
 }
