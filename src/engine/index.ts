@@ -1,10 +1,12 @@
-import { MongoClient, Db, ObjectId } from 'mongodb'
+import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb'
 import { v4 } from 'uuid'
 
 import { createMatch, createProjection, createLookup } from '../factory'
 import { Collection, Query, WherePredicate } from '../model'
 import { PaginatedResult } from '../model/paginated.result'
 import { validateUniqueFields } from '../validator/unique.validator'
+import { entityToDTO } from '../factory/mapper'
+import { writeLog } from '../utils/logger'
 
 let db: Db
 let client: MongoClient
@@ -14,11 +16,11 @@ let client: MongoClient
  * @param databaseUrl the URL of the database
  */
 export const connectDatabase = async (databaseUrl: string) => {
-  if (!db) {
-    client = new MongoClient(databaseUrl)
-    await client.connect()
-    db = client.db()
-  }
+  client = new MongoClient(databaseUrl)
+  await client.connect()
+  db = client.db()
+
+  return db
 }
 
 /**
@@ -26,7 +28,12 @@ export const connectDatabase = async (databaseUrl: string) => {
  * This ensures that users still have the choice to use MongoDB directly.
  * @returns the database
  */
-const getRawDatabase = () => db
+const getRawDatabase = () => {
+  if (!db) {
+    throw new Error('Database not connected. Call connectDatabase first.')
+  }
+  return db
+}
 
 /**
  * Close the current connection to the database
@@ -50,7 +57,7 @@ export const executeTransaction = async <T>(operations: (session: any) => Promis
 
     return result!
   } catch (error: Error | any) {
-    console.error('Transaction failed:', error)
+    writeLog('error', 'Transaction failed:', error)
     throw new Error(`Transaction failed: ${error.message}`)
   } finally {
     session.endSession()
@@ -69,28 +76,23 @@ const convertUuidToId = (filter: Record<string, unknown>) => {
 }
 
 /**
- * Get an object allowing queries inside the given collection name
- * @param collectionName the name of the collection to query
+ * Get an object allowing queries inside the given collection
+ * @type T
+ * @param collectionName the name of the collection to query, set to T type name by default
  * @returns an object allowing queries inside the given collection name
  */
-export const getCollection = async <T extends { uuid?: string | ObjectId }>(collectionName: string): Promise<Collection<T>> => {
-  const db = getRawDatabase()
+export const getCollection = async <T extends { uuid?: string | ObjectId }>(collectionName: string, database?: Db): Promise<Collection<T>> => {
+  const db = database ?? getRawDatabase()
   const collection = db.collection(collectionName)
 
   const findData = async (query?: Query<T>, single?: boolean): Promise<PaginatedResult<T>> => {
-    const transformData = <T>(data: any): T => ({
-      ...data,
-      uuid: data._id.toString(),
-      _id: undefined
-    }) as T
-  
     if (!query) {
       const totalCount = await collection.countDocuments()
       if (single) {
         const data = await collection.findOne()
 
         return {
-          datas: data ? [transformData(data)] : [],
+          datas: data ? [entityToDTO<T>(data)] : [],
           totalCount
         }
       }
@@ -98,7 +100,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       const dataList = await collection.find().toArray()
 
       return {
-        datas: dataList.map(transformData) as T[],
+        datas: dataList.map(entityToDTO<T>),
         totalCount
       }
     }
@@ -133,8 +135,14 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       }
     )
 
-    const totalCountPipeline = [...pipeline, { $count: 'totalCount' }]
-    const totalCountResult = await collection.aggregate(totalCountPipeline).toArray()
+    const countPipeline: Record<string, unknown>[] = []
+    if (Object.keys(matchStage).length) {
+      countPipeline.push({ $match: matchStage })
+    }
+    countPipeline.push({ $count: 'totalCount' })
+    const totalCountResult = await collection
+      .aggregate(countPipeline)
+      .toArray()
     const totalCount = totalCountResult[0]?.totalCount || 0
   
     if (!single) {
@@ -145,49 +153,56 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
     const result = await collection.aggregate(pipeline).toArray()
   
     return {
-      datas: result.map(transformData) as T[],
+      datas: result.map(entityToDTO<T>),
       totalCount
     }
   }
 
   return {
-    deleteData: async (query: WherePredicate<T>, session?: MongoClient['startSession']): Promise<number> => {
+    deleteData: async (
+      query: { where: WherePredicate<T> },
+      session?: ClientSession
+    ): Promise<number> => {
       try {
-        const filter: Record<string, unknown> = { ...query }
+        const filter: Record<string, unknown> = { ...query.where }
         convertUuidToId(filter)
         const deleteResult = await collection.deleteMany(filter, session ? { session } as any : undefined)
 
         return deleteResult.deletedCount || 0
       } catch (error: Error | any) {
-        console.error('Error deleting data with filter:', query, error)
+        writeLog('error', 'Error deleting data with filter:', query.where, error)
         throw new Error(`Failed to delete data: ${error.message}`)
       }
     },
 
-    findSingleData: async (query?: Query<T>) => ((await findData(query, true)).datas.shift()) as T,
+    findSingleData: async (query: Query<T>) => ((await findData(query, true)).datas.shift()) as T,
 
     findMultipleData: async (query?: Query<T>) => await findData(query),
 
-    insertData: async (data: T, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']) => {
-      const { uuid, ...actualData } = data as any
+    insertData: async (info: { data: Omit<T, 'uuid'>, uniqueFields?: (keyof T)[]}, session?: ClientSession) => {
+      const { uuid, ...actualData } = info.data as any
 
-      await validateUniqueFields<T>(collection, uniqueFields)
+      await validateUniqueFields<T>(collection, info.uniqueFields)
 
-      const { insertedId } = await collection.insertOne(
-        { _id: v4(), ...actualData },
+      const insertedId = v4()
+      await collection.insertOne(
+        { _id: insertedId, ...actualData },
         session ? { session } as any : undefined
       )
 
-      return insertedId.toString()
+      return insertedId
     },
 
-    insertMultipleData: async (datas: T[], uniqueFields?: (keyof T)[], session?: MongoClient['startSession']): Promise<string[]> => {
-      const finalDatas = datas.map(({ uuid, ...actualData }: any) => ({
+    insertMultipleData: async (
+      info: { datas: Omit<T, 'uuid'>[], uniqueFields?: (keyof T)[]},
+      session?: ClientSession
+    ): Promise<string[]> => {
+      const finalDatas = info.datas.map(({ uuid, ...actualData }: any) => ({
         _id: v4(),
         ...actualData
       }))
 
-      await validateUniqueFields<T>(collection, uniqueFields)
+      await validateUniqueFields<T>(collection, info.uniqueFields)
     
       try {
         const { insertedIds } = await collection.insertMany(finalDatas, session ? { session, ordered: false } as any : { ordered: false })
@@ -200,26 +215,29 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       }
     },
 
-    updateData: async (query: WherePredicate<T>, data: Partial<T>, uniqueFields?: (keyof T)[], session?: MongoClient['startSession']): Promise<number> => {
+    updateData: async (
+      query: {where: WherePredicate<T>, data: Partial<Omit<T, 'uuid'>>, uniqueFields?: (keyof T)[]},
+      session?: ClientSession
+    ): Promise<number> => {
       try {
-        if (Object.keys(data).length === 0) {
+        if (Object.keys(query.data).length === 0) {
           throw new Error('Update data cannot be empty')
         }
 
-        await validateUniqueFields<T>(collection, uniqueFields)
+        await validateUniqueFields<T>(collection, query.uniqueFields)
 
-        const filter: Record<string, unknown> = { ...query }
+        const filter: Record<string, unknown> = { ...query.where }
         convertUuidToId(filter)
 
         const updateResult = await collection.updateMany(
           filter,
-          { $set: data },
+          { $set: query.data },
           session ? { session } as any : undefined
         )
 
         return updateResult.modifiedCount
       } catch (error: Error | any) {
-        console.error('Error updating data with filter:', query, error)
+        writeLog('error', 'Error updating data with filter:', query, error)
         throw new Error(`Failed to update data: ${error.message}`)
       }
     }

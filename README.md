@@ -1,23 +1,45 @@
+# Carabao-Mongo
 
-# **Carabao-Mongo**
+**Carabao-Mongo** is a lightweight, TypeScript-first abstraction over the official MongoDB driver.
 
-Carabao-Mongo is a powerful TypeScript library that simplifies MongoDB operations. It provides flexible and type-safe methods for querying, inserting, updating, and deleting data, all while leveraging MongoDB's advanced capabilities like aggregation pipelines.
+Its goal is **not** to be an ORM, but to provide:
+- strong typing
+- predictable behavior
+- a clean and explicit query API
+- zero hidden magic
 
----
-
-## **Features**
-
-- **Type Safety**: Strong TypeScript support ensures safer and more predictable code.
-- **Flexible Querying**: Supports advanced filtering, joins, and projections with intuitive APIs.
-- **Utility Functions**: Simplified methods for common MongoDB operations.
-- **UUID Integration**: Automatically manages UUIDs for documents.
-- **Modular Design**: Designed for scalability and reusability.
+Carabao-Mongo stays very close to MongoDB concepts while removing repetitive boilerplate and enforcing consistency across your codebase.
 
 ---
 
-## **Installation**
+## Philosophy
 
-Install the library via NPM:
+- **No ORM**: no models, no decorators, no schema reflection.
+- **Explicit over implicit**: MongoDB always decides what happens.
+- **Thin abstraction**: you can always drop down to the native driver.
+- **TypeScript-first**: types help you write safer code, not hide complexity.
+- **Predictable joins**: no automatic cardinality changes, no magic inference.
+
+If you want full control over MongoDB with better DX, Carabao-Mongo is for you.
+
+---
+
+## Features
+
+- **Type-safe collections** using generics
+- **Explicit CRUD API** (insert, update, delete, query)
+- **Aggregation-based queries** under the hood
+- **Joins using `$lookup`**, without ORM-style relations
+- **UUID abstraction** (`_id` is exposed as `uuid`)
+- **Optimized counting** (no unnecessary joins for pagination)
+- **Multi-database support** (explicit `Db` handling)
+- **Transaction support**
+- **No decorators, no schema reflection**
+- **Stays close to the official MongoDB driver concepts**
+
+---
+
+## Installation
 
 ```bash
 npm install carabao-mongo
@@ -25,17 +47,17 @@ npm install carabao-mongo
 
 ---
 
-## **Setup**
+## Setup
 
-### Connect to the Database
+### Connect to MongoDB
 
-```typescript
+```ts
 import { connectDatabase, closeDatabase } from 'carabao-mongo'
 
 const main = async () => {
   await connectDatabase('mongodb://localhost:27017/mydb')
 
-  // Perform operations...
+  // your code here
 
   await closeDatabase()
 }
@@ -43,13 +65,15 @@ const main = async () => {
 main().catch(console.error)
 ```
 
+`connectDatabase` returns a `Db` instance, which can be reused for multi-database or multi-tenant setups.
+
 ---
 
-## **Usage**
+## Basic Usage
 
 ### Access a Collection
 
-```typescript
+```ts
 import { getCollection } from 'carabao-mongo'
 
 interface User {
@@ -65,187 +89,292 @@ const userCollection = await getCollection<User>('users')
 
 ---
 
-### Insert Data
+## Insert Data
 
-#### Insert a Single Document
+### Insert a Single Document
 
-```typescript
-const userId = await userCollection.insertData(
-  {
+```ts
+const userId = await userCollection.insertData({
+  data: {
     name: 'John Doe',
     email: 'john.doe@example.com',
     createdAt: new Date(),
     status: 'active'
   },
-  ['email'] // mark the email field as unique (inserting a data with an already existing email will raise an exception)
-)
-console.log('Inserted User ID:', userId)
+  uniqueFields: ['email']
+})
+
+console.log('Inserted user uuid:', userId)
 ```
 
-#### Insert Multiple Documents
+### Insert Multiple Documents
 
-```typescript
-const userIds = await userCollection.insertMultipleData([
-  { name: 'Alice', email: 'alice@example.com', createdAt: new Date(), status: 'active' },
-  { name: 'Bob', email: 'bob@example.com', createdAt: new Date(), status: 'inactive' }
-])
-console.log('Inserted User IDs:', userIds)
+```ts
+const userIds = await userCollection.insertMultipleData({
+  datas: [
+    { name: 'Alice', email: 'alice@example.com', createdAt: new Date(), status: 'active' },
+    { name: 'Bob', email: 'bob@example.com', createdAt: new Date(), status: 'inactive' }
+  ]
+})
+
+console.log('Inserted user uuids:', userIds)
 ```
 
 ---
 
-### Query Data
+## Query Data
 
-#### Find a Single Document
+### Find a Single Document
 
-```typescript
+```ts
 const user = await userCollection.findSingleData({
   where: { email: 'john.doe@example.com' }
 })
+
 console.log('User:', user)
 ```
 
-#### Find Multiple Documents
+### Find Multiple Documents
 
-```typescript
+```ts
 const activeUsers = await userCollection.findMultipleData({
   where: { status: 'active' },
   select: ['name', 'email'],
   sort: { createdAt: 'desc' },
   limit: 10
 })
-console.log('Active Users:', activeUsers)
+
+console.log('Active users:', activeUsers.datas)
+console.log('Total count:', activeUsers.totalCount)
+```
+
+The result includes pagination metadata:
+
+```ts
+{
+  datas: User[]
+  totalCount: number
+}
 ```
 
 ---
 
-### Update Data
+## Update Data
 
-```typescript
-const updatedCount = await userCollection.updateData(
-  { status: 'inactive' }, // Filter
-  { status: 'active' }    // Update
-)
-console.log('Updated Documents:', updatedCount)
-```
-
----
-
-### Delete Data
-
-```typescript
-const deletedCount = await userCollection.deleteData({
-  status: 'inactive'
+```ts
+const updatedCount = await userCollection.updateData({
+  where: { status: 'inactive' },
+  data: { status: 'active' }
 })
-console.log('Deleted Documents:', deletedCount)
+
+console.log('Updated documents:', updatedCount)
 ```
 
 ---
 
-### Joins
+## Delete Data
 
-#### Example: Join with Another Collection
+```ts
+const deletedCount = await userCollection.deleteData({
+  where: { status: 'inactive' }
+})
 
-```typescript
+console.log('Deleted documents:', deletedCount)
+```
+
+---
+
+## Joins
+
+Carabao-Mongo supports joins using MongoDB `$lookup`, without introducing ORM-style relations.
+
+### Example
+
+```ts
 interface Project {
   uuid?: string
   name: string
-  createdBy: string // UUID of the user who created the project
-  members: string[] // UUIDs of users who are members of the project
+  createdBy: string   // user uuid
+  members: string[]   // user uuids
 }
 
 const projectCollection = await getCollection<Project>('projects')
 
 const projects = await projectCollection.findMultipleData({
   join: {
-    createdBy: { collectionName: 'users', select: ['name', 'email'] },
-    members: { collectionName: 'users', select: ['name', 'email'] }
-  },
-  where: { status: 'active' }
+    createdBy: {
+      collectionName: 'users',
+      select: ['uuid', 'name', 'email']
+    },
+    members: {
+      collectionName: 'users',
+      select: ['uuid', 'name']
+    }
+  }
 })
 
-// projects will now contain the joined data instead of just UUIDs
-
-console.log('Projects with User Info:', projects)
+console.log(projects.datas)
 ```
+
+### Important Join Rules
+
+- Joins **never change cardinality automatically**.
+- If the original field contains:
+  - a single UUID → the joined field is an array with one element
+  - an array of UUIDs → the joined field is an array of documents
+- Joined documents expose `uuid` (no `_id` leaks).
+
+This keeps joins **predictable and explicit**.
 
 ---
 
-## **Advanced Features**
+## Advanced Queries
 
-### Custom Query Conditions
+### MongoDB Operators
 
-Leverage MongoDB operators like `$gte`, `$regex`, and `$in` for advanced queries:
+You can use native MongoDB operators in `where` clauses:
 
-```typescript
+```ts
 const recentUsers = await userCollection.findMultipleData({
   where: {
     createdAt: { $gte: new Date('2024-01-01') },
     name: { $regex: /john/i }
   }
 })
-console.log('Recent Users:', recentUsers)
 ```
 
-### Pagination
+---
 
-Use `limit` and `skip` for efficient pagination:
+## Pagination
 
-```typescript
+```ts
 const users = await userCollection.findMultipleData({
   where: { status: 'active' },
   limit: 10,
   skip: 20
 })
-console.log('Paginated Users:', users)
+```
+
+Counting is optimized and does **not** execute joins.
+
+---
+
+## Transactions
+
+```ts
+import { executeTransaction, getCollection } from 'carabao-mongo'
+import type { ClientSession } from 'mongodb'
+
+interface User {
+  uuid?: string
+  name: string
+  email: string
+  createdAt: Date
+  status: 'active' | 'inactive'
+}
+
+const userCollection = await getCollection<User>('users')
+
+await executeTransaction(async (session: ClientSession) => {
+  await userCollection.insertData(
+    {
+      data: {
+        name: 'Alice',
+        email: 'a@test.com',
+        createdAt: new Date(),
+        status: 'active'
+      }
+    },
+    session
+  )
+
+  await userCollection.updateData(
+    {
+      where: { email: 'a@test.com' },
+      data: { status: 'inactive' }
+    },
+    session
+  )
+})
 ```
 
 ---
 
-## **Error Handling**
+## Multi-Database Usage
 
-All methods throw descriptive errors on failure. Use `try...catch` to handle them:
+If you work with multiple databases (multi-tenant, sharding, etc.), you can pass a `Db` instance to `getCollection`:
 
-```typescript
+```ts
+import { connectDatabase, getCollection } from 'carabao-mongo'
+
+const dbA = await connectDatabase('mongodb://localhost:27017/tenantA')
+const dbB = await connectDatabase('mongodb://localhost:27017/tenantB')
+
+interface User {
+  uuid?: string
+  email: string
+}
+
+const usersA = await getCollection<User>('users', dbA)
+const usersB = await getCollection<User>('users', dbB)
+
+const a = await usersA.findMultipleData()
+const b = await usersB.findMultipleData()
+```
+
+---
+
+## Error Handling
+
+All methods throw descriptive errors.
+
+```ts
 try {
-  const user = await userCollection.findSingleData({ where: { email: 'notfound@example.com' } })
+  const user = await userCollection.findSingleData({
+    where: { email: 'unknown@example.com' }
+  })
   console.log('User:', user)
 } catch (error) {
-  console.error('Error:', error)
+  console.error(error)
 }
 ```
 
 ---
 
-## **Contributing**
+## Contributing
 
 1. Clone the repository:
 ```bash
-   git clone https://github.com/TinyRabarioelina/carabao-mongo.git
+git clone https://github.com/TinyRabarioelina/carabao-mongo.git
 ```
+
 2. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
+
 3. Run tests:
-   ```bash
-   npm test
-   ```
+```bash
+npm test
+```
 
 ---
 
-## **License**
+## License
 
-Carabao-Mongo is licensed under the MIT License. See the [LICENSE](https://github.com/TinyRabarioelina/carabao-mongo/blob/main/LICENSE) file for more details.
+MIT © Tiny Rabarioelina  
+See the LICENSE file in the repository.
 
 ---
 
-## **Feedback**
+## Feedback
 
-If you have any feedback, feature requests, or encounter issues, please open an [issue](https://github.com/TinyRabarioelina/carabao-mongo/issues).
+Issues and feature requests are welcome:
+- https://github.com/TinyRabarioelina/carabao-mongo/issues
 
-## **Acknowledgments**
+---
 
-This library was inspired by the incredible work of the [Prisma team](https://www.prisma.io/). Their approach to simplifying and streamlining database interactions served as a foundation for many of the ideas implemented in Carabao-Mongo. While Carabao-Mongo focuses specifically on MongoDB, Prisma’s design principles influenced the structure and philosophy of this project.
+## Acknowledgments
 
-Thank you to the Prisma team for their contribution to the developer ecosystem!
+Carabao-Mongo was inspired by the **design principles** of tools like Prisma,  
+but deliberately avoids ORM-style abstractions in favor of explicit MongoDB behavior.
