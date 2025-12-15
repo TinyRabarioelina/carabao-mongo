@@ -1,4 +1,5 @@
 import { Collection, Document } from "mongodb"
+import { writeLog } from "../utils/logger"
 
 /**
  * Validates that the specified fields in the given MongoDB collection are unique.
@@ -17,7 +18,7 @@ export const validateUniqueFields = async <T>(collection: Collection<Document>, 
           await collection.createIndex({ [field]: 1 }, { unique: true })
         }
       } catch(e: any) {
-        console.log('No need to create index for field: ', field)
+        writeLog('info', 'No need to create index for field: ', field)
       }
     }
   }
