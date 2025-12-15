@@ -16,20 +16,19 @@ export const createLookup = <T>(
       const { collectionName, select: joinSelect } = joinConfig as JoinOptions
 
       // Build the `$project` stage for the lookup pipeline
-      const projectStage = joinSelect?.length
-        ? joinSelect.reduce(
-            (acc, key) => {
-              if (key === '_id') {
-                acc['uuid'] = '$_id' // Map `_id` to `uuid`
-              } else {
-                acc[key] = `$${key}` // Include other selected fields
-              }
+      const projectStage: Record<string, string | undefined> = joinSelect?.length
+        ? joinSelect.reduce((acc, key) => {
+            if (key === 'uuid') {
+              acc['uuid'] = '$_id'
+            } else {
+              acc[key] = `$${key}`
+            }
+            
+            return acc
+          }, {} as Record<string, string>)
+        : { uuid: '$_id' }
 
-              return acc
-            },
-            {} as Record<string, string>
-          )
-        : { uuid: '$_id' } // Default to mapping `_id` to `uuid` if no fields are selected
+      projectStage['_id'] = undefined
 
       const pipeline: any[] = []
 
@@ -49,14 +48,6 @@ export const createLookup = <T>(
           foreignField: '_id',
           as: field,
           pipeline // Include the pipeline with `$project`
-        }
-      })
-
-      // Add `$unwind` stage to flatten arrays and handle nulls
-      lookupStages.push({
-        $unwind: {
-          path: `$${field}`,
-          preserveNullAndEmptyArrays: true
         }
       })
     }
