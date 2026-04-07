@@ -1,4 +1,4 @@
-import { JoinOptions, StringAndStringArrayFields } from "../model/query";
+import { JoinOptions, StringAndStringArrayFields } from '../model/query'
 
 /**
  * Create a lookup object to search for nested objects
@@ -14,40 +14,65 @@ export const createLookup = <T>(
   if (join) {
     for (const [field, joinConfig] of Object.entries(join)) {
       const { collectionName, select: joinSelect } = joinConfig as JoinOptions
+      const isArrayFieldFlag = `__${field}_isArray`
 
-      // Build the `$project` stage for the lookup pipeline
-      const projectStage: Record<string, string | undefined> = joinSelect?.length
+      const projectStage: Record<string, string | number> = joinSelect?.length
         ? joinSelect.reduce((acc, key) => {
             if (key === 'uuid') {
-              acc['uuid'] = '$_id'
+              acc.uuid = '$_id'
             } else {
               acc[key] = `$${key}`
             }
-            
+
             return acc
           }, {} as Record<string, string>)
         : { uuid: '$_id' }
 
-      projectStage['_id'] = undefined
+      projectStage._id = 0
 
-      const pipeline: any[] = []
+      const pipeline: Record<string, unknown>[] = []
 
-      // Add custom match conditions if provided
       if (joinConditions?.[field]) {
         pipeline.push({ $match: joinConditions[field] })
       }
 
-      // Add the `$project` stage to limit fields
       pipeline.push({ $project: projectStage })
 
-      // Add the `$lookup` stage
+      lookupStages.push({
+        $addFields: {
+          [isArrayFieldFlag]: {
+            $isArray: `$${field}`
+          }
+        }
+      })
+
       lookupStages.push({
         $lookup: {
           from: collectionName,
           localField: field,
           foreignField: '_id',
           as: field,
-          pipeline // Include the pipeline with `$project`
+          pipeline
+        }
+      })
+
+      lookupStages.push({
+        $addFields: {
+          [field]: {
+            $cond: {
+              if: `$${isArrayFieldFlag}`,
+              then: `$${field}`,
+              else: {
+                $arrayElemAt: [`$${field}`, 0]
+              }
+            }
+          }
+        }
+      })
+
+      lookupStages.push({
+        $project: {
+          [isArrayFieldFlag]: 0
         }
       })
     }
