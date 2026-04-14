@@ -1,3 +1,5 @@
 export * from './lookup.factory'
 export * from './match.factory'
 export * from './projection.factory'
+export * from './compute.factory'
+export * from './mapper'

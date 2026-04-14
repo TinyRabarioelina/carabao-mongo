@@ -1,6 +1,7 @@
 import { MongoClient, ClientSession } from "mongodb"
 import { PaginatedResult } from "./paginated.result"
 import { Query, WherePredicate } from "./query"
+import { AggregateQuery } from "./aggregate"
 
 /**
  * An interface representing a MongoDB collection and its common operations.
@@ -71,4 +72,22 @@ export interface Collection<T> {
    * @returns A promise that resolves to the count of matching records.
    */
   countData: (predicate?: { where: WherePredicate<T> }) => Promise<number>
+
+  /**
+   * Executes an aggregation pipeline and returns the computed results.
+   * Use this for cross-document computations like `$group`, `$sum`, `$avg`, etc.
+   * @param query - The aggregation definition using intuitive `where`, `groupBy`, `compute` options.
+   * @returns A promise that resolves to an array of aggregation results.
+   *
+   * Example:
+   * ```typescript
+   * const results = await collection.aggregateData({
+   *   where: { status: 'active' },
+   *   groupBy: '$status',
+   *   compute: { total: { $sum: '$amount' }, avg: { $avg: '$amount' }, count: { $sum: 1 } },
+   *   sort: { total: 'desc' }
+   * })
+   * ```
+   */
+  aggregateData: (query: AggregateQuery<T>) => Promise<Record<string, unknown>[]>
 }

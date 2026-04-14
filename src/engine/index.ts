@@ -1,8 +1,8 @@
 import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb'
 import { v4 } from 'uuid'
 
-import { createMatch, createProjection, createLookup } from '../factory'
-import { Collection, Query, WherePredicate } from '../model'
+import { createMatch, createProjection, createLookup, createCompute } from '../factory'
+import { Collection, Query, WherePredicate, AggregateQuery } from '../model'
 import { PaginatedResult } from '../model/paginated.result'
 import { validateUniqueFields } from '../validator/unique.validator'
 import { entityToDTO } from '../factory/mapper'
@@ -105,7 +105,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       }
     }
   
-    const { where, select, join, joinConditions, limit, skip, sort, aliases } = query
+    const { where, select, join, joinConditions, limit, skip, sort, aliases, compute } = query
    
     const pipeline: Record<string, unknown>[] = []
 
@@ -123,6 +123,9 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
         )
       }
     )
+
+    const computeStage = createCompute(compute)
+    computeStage && pipeline.push(computeStage)
 
     const projectionStage = createProjection(select)
     Object.keys(projectionStage).length && pipeline.push({ $project: projectionStage })
@@ -257,6 +260,45 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
       } catch (error: Error | any) {
         writeLog('error', 'Error counting data with filter:', predicate?.where, error)
         throw new Error(`Failed to count data: ${error.message}`)
+      }
+    },
+
+    aggregateData: async (query: AggregateQuery<T>) => {
+      try {
+        const { where, groupBy, compute, sort, limit } = query
+
+        const pipeline: Record<string, unknown>[] = []
+
+        // $match
+        where && convertUuidToId(where as Record<string, unknown>)
+        const matchStage = createMatch(where)
+        Object.keys(matchStage).length && pipeline.push({ $match: matchStage })
+
+        // $group
+        const groupStage: Record<string, unknown> = { _id: groupBy ?? null }
+        if (compute) {
+          Object.entries(compute).forEach(([key, expr]) => {
+            groupStage[key] = expr
+          })
+        }
+        pipeline.push({ $group: groupStage })
+
+        // $sort
+        sort && pipeline.push({
+          $sort: Object.fromEntries(
+            Object.entries(sort).map(([key, order]) => [key, order === 'asc' ? 1 : -1])
+          )
+        })
+
+        // $limit
+        typeof limit === 'number' && limit > 0 && pipeline.push({ $limit: limit })
+
+        const result = await collection.aggregate(pipeline).toArray()
+
+        return result
+      } catch (error: Error | any) {
+        writeLog('error', 'Error executing aggregation:', query, error)
+        throw new Error(`Failed to execute aggregation: ${error.message}`)
       }
     }
   }

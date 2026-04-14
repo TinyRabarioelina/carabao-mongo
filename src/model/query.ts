@@ -135,6 +135,23 @@ export interface Query<T> {
    * ```
    */
   aliases?: Record<(keyof T), string>
+
+  /**
+   * Adds computed fields to each document using MongoDB aggregation expressions.
+   * - Supports operators like `$sum`, `$avg`, `$min`, `$max`, `$multiply`, `$add`, `$subtract`, `$divide`, etc.
+   * - Field references must be prefixed with `$` (e.g., `'$price'`).
+   *
+   * Example:
+   * ```typescript
+   * compute: {
+   *   total: { $multiply: ['$price', '$quantity'] },
+   *   discountedTotal: { $multiply: [{ $multiply: ['$price', '$quantity'] }, 0.9] },
+   *   sumOfFields: { $add: ['$fieldA', '$fieldB'] },
+   *   itemsSum: { $sum: '$lineItems.price' }
+   * }
+   * ```
+   */
+  compute?: Record<string, Record<string, unknown>>
 }
 
 /**
