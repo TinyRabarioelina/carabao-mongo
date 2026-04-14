@@ -143,4 +143,9 @@ export interface Query<T> {
 export interface JoinOptions {
   collectionName: string
   select?: string[]
+  /**
+   * The field in the foreign collection to match against.
+   * Defaults to `'_id'` (the MongoDB internal identifier).
+   */
+  foreignField?: string
 }
