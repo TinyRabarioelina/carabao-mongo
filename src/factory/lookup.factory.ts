@@ -50,7 +50,7 @@ export const createLookup = <T>(
         $lookup: {
           from: collectionName,
           localField: field,
-          foreignField: '_id',
+          foreignField: (joinConfig as JoinOptions).foreignField ?? '_id',
           as: field,
           pipeline
         }
