@@ -1,4 +1,4 @@
-import { MongoClient, ClientSession } from "mongodb"
+import { MongoClient, ClientSession, ObjectId } from "mongodb"
 import { PaginatedResult } from "./paginated.result"
 import { Query, WherePredicate } from "./query"
 import { AggregateQuery } from "./aggregate"
@@ -7,7 +7,7 @@ import { AggregateQuery } from "./aggregate"
  * An interface representing a MongoDB collection and its common operations.
  * Provides methods for manipulating data within a specific collection.
  */
-export interface Collection<T> {
+export interface Collection<T extends { uuid?: string | ObjectId }> {
   /**
    * Inserts a single record into the collection.
    * @param data - The data object to insert.
@@ -15,7 +15,7 @@ export interface Collection<T> {
    * @returns A promise that resolves to the unique ID of the inserted record.
    */
   insertData: (
-    info: { data: T, uniqueFields?: (keyof T)[]},
+    info: { data: Omit<T, 'uuid'> & Partial<Pick<T, 'uuid'>>, uniqueFields?: (keyof T)[]},
     session?: ClientSession
   ) => Promise<string>
 
@@ -26,7 +26,7 @@ export interface Collection<T> {
   * @returns
   */
   insertMultipleData: (
-    datas: {datas: T[], uniqueFields?: (keyof T)[]},
+    datas: {datas: (Omit<T, 'uuid'> & Partial<Pick<T, 'uuid'>>)[], uniqueFields?: (keyof T)[]},
     session?: ClientSession
   ) => Promise<string[]>
 

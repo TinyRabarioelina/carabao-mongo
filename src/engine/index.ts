@@ -182,7 +182,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
 
     findMultipleData: async (query?: Query<T>) => await findData(query),
 
-    insertData: async (info: { data: T, uniqueFields?: (keyof T)[]}, session?: ClientSession) => {
+    insertData: async (info: { data: Omit<T, 'uuid'> & Partial<Pick<T, 'uuid'>>, uniqueFields?: (keyof T)[]}, session?: ClientSession) => {
       const { uuid, ...actualData } = info.data as any
 
       await validateUniqueFields<T>(collection, info.uniqueFields)
@@ -197,7 +197,7 @@ export const getCollection = async <T extends { uuid?: string | ObjectId }>(coll
     },
 
     insertMultipleData: async (
-      info: { datas: T[], uniqueFields?: (keyof T)[]},
+      info: { datas: (Omit<T, 'uuid'> & Partial<Pick<T, 'uuid'>>)[], uniqueFields?: (keyof T)[]},
       session?: ClientSession
     ): Promise<string[]> => {
       const finalDatas = info.datas.map(({ uuid, ...actualData }: any) => ({
