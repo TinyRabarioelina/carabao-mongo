@@ -15,18 +15,18 @@ export interface Collection<T> {
    * @returns A promise that resolves to the unique ID of the inserted record.
    */
   insertData: (
-    info: { data: Omit<T, 'uuid'>, uniqueFields?: (keyof T)[]},
+    info: { data: T, uniqueFields?: (keyof T)[]},
     session?: ClientSession
   ) => Promise<string>
 
  /**
-  * 
-  * @param info 
-  * @param session 
-  * @returns 
+  *
+  * @param info
+  * @param session
+  * @returns
   */
   insertMultipleData: (
-    datas: {datas: Omit<T, 'uuid'>[], uniqueFields?: (keyof T)[]},
+    datas: {datas: T[], uniqueFields?: (keyof T)[]},
     session?: ClientSession
   ) => Promise<string[]>
 
