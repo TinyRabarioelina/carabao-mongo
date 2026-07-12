@@ -1,12 +1,11 @@
-import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb'
-import { v4 } from 'uuid'
+import { MongoClient, Db, ObjectId } from 'mongodb'
 
-import { createMatch, createProjection, createLookup, createCompute } from '../factory'
-import { Collection, Query, WherePredicate, AggregateQuery } from '../model'
-import { PaginatedResult } from '../model/paginated.result'
-import { validateUniqueFields } from '../validator/unique.validator'
-import { entityToDTO } from '../factory/mapper'
+import { Collection } from '../model'
 import { writeLog } from '../utils/logger'
+import * as read from './read'
+import * as create from './create'
+import * as update from './update'
+import * as del from './delete'
 
 let db: Db
 let client: MongoClient
@@ -65,241 +64,39 @@ export const executeTransaction = async <T>(operations: (session: any) => Promis
 }
 
 /**
- * Utility to convert `uuid` to `_id`
- * @param filter The filter object to modify
- */
-const convertUuidToId = (filter: Record<string, unknown>) => {
-  if (filter.uuid) {
-    filter['_id'] = filter.uuid
-    delete filter.uuid
-  }
-}
-
-/**
- * Get an object allowing queries inside the given collection
+ * Get an object allowing queries inside the given collection.
+ * Each operation is implemented in its own module (create / read / update / delete)
+ * and receives the native collection handle; this factory only wires them together.
  * @type T
- * @param collectionName the name of the collection to query, set to T type name by default
- * @returns an object allowing queries inside the given collection name
+ * @param collectionName the name of the collection to query
+ * @param database optional database handle for multi-database setups
+ * @returns an object exposing the typed CRUD API for the collection
  */
-export const getCollection = async <T extends { uuid?: string | ObjectId }>(collectionName: string, database?: Db): Promise<Collection<T>> => {
-  const db = database ?? getRawDatabase()
-  const collection = db.collection(collectionName)
-
-  const findData = async (query?: Query<T>, single?: boolean): Promise<PaginatedResult<T>> => {
-    if (!query) {
-      const totalCount = await collection.countDocuments()
-      if (single) {
-        const data = await collection.findOne()
-
-        return {
-          datas: data ? [entityToDTO<T>(data)] : [],
-          totalCount
-        }
-      }
-  
-      const dataList = await collection.find().toArray()
-
-      return {
-        datas: dataList.map(entityToDTO<T>),
-        totalCount
-      }
-    }
-  
-    const { where, select, join, joinConditions, limit, skip, sort, aliases, compute } = query
-   
-    const pipeline: Record<string, unknown>[] = []
-
-    where && convertUuidToId(where)
-    const matchStage = createMatch(where)
-    Object.keys(matchStage).length && pipeline.push({ $match: matchStage })
-
-    const lookupStages = createLookup(join, joinConditions)
-    pipeline.push(...lookupStages)
-
-    aliases && pipeline.push(
-      {
-        $addFields: Object.fromEntries(
-          Object.entries(aliases).map(([alias, original]) => [alias, `$${original}`])
-        )
-      }
-    )
-
-    const computeStage = createCompute(compute)
-    computeStage && pipeline.push(computeStage)
-
-    const projectionStage = createProjection(select)
-    Object.keys(projectionStage).length && pipeline.push({ $project: projectionStage })
-
-    sort && pipeline.push(
-      {
-        $sort: Object.fromEntries(
-          Object.entries(sort).map(([key, order]) => [key, order === 'asc' ? 1 : -1])
-        )
-      }
-    )
-
-    const countPipeline: Record<string, unknown>[] = []
-    if (Object.keys(matchStage).length) {
-      countPipeline.push({ $match: matchStage })
-    }
-    countPipeline.push({ $count: 'totalCount' })
-    const totalCountResult = await collection
-      .aggregate(countPipeline)
-      .toArray()
-    const totalCount = totalCountResult[0]?.totalCount || 0
-  
-    if (!single) {
-      if (typeof skip === 'number' && skip > 0) pipeline.push({ $skip: skip })
-      if (typeof limit === 'number' && limit > 0) pipeline.push({ $limit: limit })
-    }
-  
-    const result = await collection.aggregate(pipeline).toArray()
-  
-    return {
-      datas: result.map(entityToDTO<T>),
-      totalCount
-    }
-  }
+export const getCollection = async <T extends { uuid?: string | ObjectId }>(
+  collectionName: string,
+  database?: Db
+): Promise<Collection<T>> => {
+  const activeDb = database ?? getRawDatabase()
+  const collection = activeDb.collection(collectionName)
 
   return {
-    deleteData: async (
-      query: { where: WherePredicate<T> },
-      session?: ClientSession
-    ): Promise<number> => {
-      try {
-        const filter: Record<string, unknown> = { ...query.where }
-        convertUuidToId(filter)
-        const deleteResult = await collection.deleteMany(filter, session ? { session } as any : undefined)
+    // create
+    insertData: (info, session) => create.insertData<T>(collection, info, session),
+    insertMultipleData: (info, session) => create.insertMultipleData<T>(collection, info, session),
+    createIndex: (fields, options) => create.createIndex(collection, fields, options),
 
-        return deleteResult.deletedCount || 0
-      } catch (error: Error | any) {
-        writeLog('error', 'Error deleting data with filter:', query.where, error)
-        throw new Error(`Failed to delete data: ${error.message}`)
-      }
-    },
+    // read
+    findSingleData: (query) => read.findSingleData<T>(collection, query),
+    findSingleDataOrThrow: (query, errorMessage) => read.findSingleDataOrThrow<T>(collection, query, errorMessage),
+    findMultipleData: (query) => read.findMultipleData<T>(collection, query),
+    countData: (predicate) => read.countData<T>(collection, predicate),
+    aggregateData: (query) => read.aggregateData<T>(collection, query),
 
-    findSingleData: async (query: Query<T>) => ((await findData(query, true)).datas.shift()) as T,
+    // update
+    updateData: (query, session) => update.updateData<T>(collection, query, session),
+    upsertData: (query, session) => update.upsertData<T>(collection, query, session),
 
-    findMultipleData: async (query?: Query<T>) => await findData(query),
-
-    insertData: async (info: { data: Omit<T, 'uuid'> & Partial<Pick<T, 'uuid'>>, uniqueFields?: (keyof T)[]}, session?: ClientSession) => {
-      const { uuid, ...actualData } = info.data as any
-
-      await validateUniqueFields<T>(collection, info.uniqueFields)
-
-      const insertedId = uuid ?? v4()
-      await collection.insertOne(
-        { _id: insertedId, ...actualData },
-        session ? { session } as any : undefined
-      )
-
-      return insertedId
-    },
-
-    insertMultipleData: async (
-      info: { datas: (Omit<T, 'uuid'> & Partial<Pick<T, 'uuid'>>)[], uniqueFields?: (keyof T)[]},
-      session?: ClientSession
-    ): Promise<string[]> => {
-      const finalDatas = info.datas.map(({ uuid, ...actualData }: any) => ({
-        _id: uuid ?? v4(),
-        ...actualData
-      }))
-
-      await validateUniqueFields<T>(collection, info.uniqueFields)
-    
-      try {
-        const { insertedIds } = await collection.insertMany(finalDatas, session ? { session, ordered: false } as any : { ordered: false })
-    
-        return Object.keys(insertedIds).map(index => insertedIds[parseInt(index)].toString())
-      } catch (err: any) {
-        return err.result?.insertedIds
-          ? Object.values(err.result.insertedIds).map((id: any) => id.toString())
-          : []
-      }
-    },
-
-    updateData: async (
-      query: {where: WherePredicate<T>, data: Partial<Omit<T, 'uuid'>>, uniqueFields?: (keyof T)[]},
-      session?: ClientSession
-    ): Promise<number> => {
-      try {
-        if (Object.keys(query.data).length === 0) {
-          throw new Error('Update data cannot be empty')
-        }
-
-        await validateUniqueFields<T>(collection, query.uniqueFields)
-
-        const filter: Record<string, unknown> = { ...query.where }
-        convertUuidToId(filter)
-
-        const updateResult = await collection.updateMany(
-          filter,
-          { $set: query.data },
-          session ? { session } as any : undefined
-        )
-
-        return updateResult.modifiedCount
-      } catch (error: Error | any) {
-        writeLog('error', 'Error updating data with filter:', query, error)
-        throw new Error(`Failed to update data: ${error.message}`)
-      }
-    },
-
-    countData: async (predicate?: { where: WherePredicate<T> }) => {
-      try {
-        if (!predicate?.where) {
-          return await collection.countDocuments()
-        }
-
-        const filter: Record<string, unknown> = { ...predicate.where }
-        convertUuidToId(filter)
-
-        const matchStage = createMatch(filter)
-
-        return await collection.countDocuments(matchStage)
-      } catch (error: Error | any) {
-        writeLog('error', 'Error counting data with filter:', predicate?.where, error)
-        throw new Error(`Failed to count data: ${error.message}`)
-      }
-    },
-
-    aggregateData: async (query: AggregateQuery<T>) => {
-      try {
-        const { where, groupBy, compute, sort, limit } = query
-
-        const pipeline: Record<string, unknown>[] = []
-
-        // $match
-        where && convertUuidToId(where as Record<string, unknown>)
-        const matchStage = createMatch(where)
-        Object.keys(matchStage).length && pipeline.push({ $match: matchStage })
-
-        // $group
-        const groupStage: Record<string, unknown> = { _id: groupBy ?? null }
-        if (compute) {
-          Object.entries(compute).forEach(([key, expr]) => {
-            groupStage[key] = expr
-          })
-        }
-        pipeline.push({ $group: groupStage })
-
-        // $sort
-        sort && pipeline.push({
-          $sort: Object.fromEntries(
-            Object.entries(sort).map(([key, order]) => [key, order === 'asc' ? 1 : -1])
-          )
-        })
-
-        // $limit
-        typeof limit === 'number' && limit > 0 && pipeline.push({ $limit: limit })
-
-        const result = await collection.aggregate(pipeline).toArray()
-
-        return result
-      } catch (error: Error | any) {
-        writeLog('error', 'Error executing aggregation:', query, error)
-        throw new Error(`Failed to execute aggregation: ${error.message}`)
-      }
-    }
+    // delete
+    deleteData: (query, session) => del.deleteData<T>(collection, query, session)
   }
 }
